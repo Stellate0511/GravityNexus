@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gravity Nexus | 重力枢纽</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* --- 核心视觉风格 --- */
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background-color: #02040a;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(16, 185, 129, 0.08) 0%, transparent 45%),
+                radial-gradient(circle at 85% 30%, rgba(59, 130, 246, 0.08) 0%, transparent 45%),
+                linear-gradient(0deg, rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+            color: #e2e8f0;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        .neon-text { text-shadow: 0 0 5px rgba(56, 189, 248, 0.7), 0 0 20px rgba(14, 165, 233, 0.5); }
+        .neon-green { text-shadow: 0 0 5px rgba(34, 197, 94, 0.7), 0 0 10px rgba(34, 197, 94, 0.5); }
+        .neon-blue { text-shadow: 0 0 5px rgba(59, 130, 246, 0.7), 0 0 10px rgba(59, 130, 246, 0.5); }
+
+        /* --- 棋盘容器 --- */
+        .board-container {
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.9), inset 0 0 60px rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            backdrop-filter: blur(12px);
+            background: rgba(10, 15, 30, 0.6);
+            transition: all 0.3s ease;
+        }
+        .board-container.locked {
+            pointer-events: none;
+            opacity: 0.9;
+            filter: grayscale(0.8);
+        }
+
+        /* --- 棋盘格子 --- */
+        .grid-cell {
+            border: 1px solid rgba(148, 163, 184, 0.05);
+            position: relative;
+            transition: background-color 0.2s;
+        }
+        
+        /* 购买模式下的整列高亮 */
+        .mode-buy-g .grid-col-hover, 
+        .mode-buy-b .grid-col-hover {
+            background: rgba(255, 255, 255, 0.05);
+            box-shadow: inset 0 0 10px rgba(255,255,255,0.05);
+        }
+
+        /* --- 棋子 --- */
+        .piece {
+            width: 80%; height: 80%;
+            border-radius: 50%;
+            position: absolute;
+            top: 10%; left: 10%;
+            z-index: 10;
+            /* 默认过渡用于 hover 等微小变化，但不干扰大动画 */
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: inset 2px 2px 5px rgba(255,255,255,0.4), 0 5px 15px rgba(0,0,0,0.5);
+            pointer-events: none; /* 让点击穿透到格子 */
+        }
+        
+        .piece.green {
+            background: radial-gradient(circle at 30% 30%, #4ade80, #16a34a, #14532d);
+            border: 1px solid #22c55e;
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.5);
+        }
+        .piece.blue {
+            background: radial-gradient(circle at 30% 30%, #60a5fa, #2563eb, #1e3a8a);
+            border: 1px solid #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+
+        /* 消除动画：放大并消失 */
+        .match-anim {
+            transition: none !important; /* 禁止默认过渡干扰 */
+            animation: matchScale 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+            z-index: 50 !important; /* 确保动画在最上层 */
+        }
+        @keyframes matchScale {
+            0% { transform: scale(1); filter: brightness(1.5); }
+            40% { transform: scale(1.4); filter: brightness(2.5); opacity: 1; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+
+        /* 删除动画：破碎/缩小 */
+        .delete-anim {
+            transition: none !important;
+            animation: deleteShrink 0.5s forwards;
+            z-index: 50 !important;
+        }
+        @keyframes deleteShrink {
+            0% { transform: scale(1); filter: grayscale(0); }
+            30% { transform: scale(0.9); filter: grayscale(1) brightness(2) drop-shadow(0 0 10px red); }
+            100% { transform: scale(0) rotate(90deg); opacity: 0; }
+        }
+
+        /* 落子动画 */
+        .new-piece-anim {
+            animation: dropIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes dropIn {
+            from { transform: translateY(-300%) scale(0.5); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
+        }
+
+        /* --- UI 组件 --- */
+        .cyber-btn {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .cyber-btn:hover:not(:disabled) {
+            border-color: #38bdf8;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+            transform: translateY(-2px);
+            color: #fff;
+        }
+        .cyber-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            border-color: #334155;
+            filter: grayscale(1);
+        }
+        /* 激活状态 */
+        .cyber-btn.active {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: #38bdf8;
+            box-shadow: inset 0 0 15px rgba(56, 189, 248, 0.4);
+            color: #fff;
+            transform: translateY(1px);
+        }
+
+        /* AP 点数指示器 */
+        .ap-pip {
+            width: 8px; height: 16px;
+            background: #1e293b;
+            border: 1px solid #475569;
+            transform: skewX(-20deg);
+            transition: all 0.3s;
+        }
+        .ap-pip.filled {
+            background: #22d3ee;
+            border-color: #67e8f9;
+            box-shadow: 0 0 8px #22d3ee;
+        }
+
+        /* 模式高亮光标 */
+        .mode-delete .grid-cell:hover { background: rgba(239, 68, 68, 0.3) !important; cursor: pointer; }
+        .mode-match .grid-cell:hover { background: rgba(234, 179, 8, 0.3) !important; cursor: pointer; }
+        .mode-buy-g .grid-cell { cursor: pointer; }
+        .mode-buy-b .grid-cell { cursor: pointer; }
+
+        /* 浮动得分 (放置在独立层) */
+        .float-text {
+            position: absolute;
+            color: #fff;
+            font-weight: bold;
+            font-size: 1.5rem;
+            pointer-events: none;
+            animation: floatUp 1s forwards;
+            z-index: 100;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            width: 100%;
+            text-align: center;
+        }
+        @keyframes floatUp {
+            0% { transform: translateY(0) scale(0.5); opacity: 0; }
+            20% { transform: translateY(-30px) scale(1.2); opacity: 1; }
+            100% { transform: translateY(-70px) scale(1); opacity: 0; }
+        }
+        
+        /* 棋盘提示文字动画 */
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* --- 左上角头像挂件 (窗口内) --- */
+        #profile-link {
+            position: absolute;
+            /* 调整到窗口内部左上角的合适位置 */
+            top: 20px;
+            left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px; /* 稍微缩进一点间距 */
+            text-decoration: none;
+            /* 确保在启动屏幕(z-index:100)之上 */
+            z-index: 101; 
+            transition: all 0.3s ease;
+            cursor: pointer;
+            user-select: none; -webkit-user-select: none;
+        }
+
+        #profile-link:hover {
+            filter: brightness(1.2);
+        }
+        #profile-link:hover img {
+            box-shadow: 0 0 20px #00f3ff;
+            transform: scale(1.05) rotate(5deg); /* 增加一点点旋转动感 */
+        }
+
+        #profile-link img {
+            width: 45px; /* 稍微缩小一点点以适应内部空间 */
+            height: 45px;
+            /* 核心修改：圆形蒙版 */
+            border-radius: 50%; 
+            border: 2px solid #00f3ff;
+            box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+            background: #000;
+            object-fit: cover;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .profile-info {
+            display: flex; 
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .profile-name {
+            color:  #e0fbfc;
+            font-size: 0.9rem; /* 字体稍微减小适配 */
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(0, 243, 255, 0.5);
+            font-family: 'Courier New', monospace;
+        }
+
+        .profile-role {
+            color: #005f73;
+            font-size: 0.6rem;
+            letter-spacing: 2px;
+            font-weight: bold;
+        }
+
+        /* 移动端适配：仅在手机窄屏(<600px)时隐藏，防止与标题重叠 */
+        @media (max-width: 600px) {
+            #profile-link { display: none; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-2">
+    <a id="profile-link" href="/">
+        <img src="/avatar.jpg" alt="Avatar">
+        <div class="profile-info">
+            <span class="profile-name">回到主页</span>
+            <span class="profile-role">LINK START</span>
+        </div>
+    </a>
+    <!-- Header -->
+    <header class="mb-4 text-center z-10 w-full max-w-lg">
+        <h1 class="text-3xl md:text-4xl font-bold neon-text tracking-widest mb-1">GRAVITY <span class="text-white">NEXUS</span></h1>
+        <div class="flex justify-between items-end px-4 mt-4">
+            <!-- P1 Score -->
+            <div class="text-left w-1/3">
+                <div class="text-[10px] text-slate-500 tracking-[0.2em] uppercase">Player 1</div>
+                <div id="p1-score" class="text-3xl font-bold text-green-400 neon-green">0</div>
+            </div>
+            
+            <!-- AP & Turn -->
+            <div class="flex flex-col items-center gap-2 w-1/3">
+                <div id="turn-indicator" class="px-3 py-1 bg-slate-800 border border-slate-600 text-xs text-cyan-400 rounded tracking-wider shadow-lg">PLAYER 1</div>
+                <div class="flex gap-1 mt-1" id="ap-container">
+                    <!-- AP Pips Generated by JS -->
+                </div>
+                <div class="text-[9px] text-slate-500 tracking-widest mt-1">ACTION POINTS</div>
+            </div>
+
+            <!-- P2 Score -->
+            <div class="text-right w-1/3">
+                <div class="text-[10px] text-slate-500 tracking-[0.2em] uppercase">Player 2</div>
+                <div id="p2-score" class="text-3xl font-bold text-blue-400 neon-blue">0</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Game Board -->
+    <div class="relative z-10 mb-4">
+        <!-- 装饰角标 -->
+        <div class="absolute -top-3 -left-3 w-6 h-6 border-t-2 border-l-2 border-slate-600 rounded-tl-lg"></div>
+        <div class="absolute -top-3 -right-3 w-6 h-6 border-t-2 border-r-2 border-slate-600 rounded-tr-lg"></div>
+        <div class="absolute -bottom-3 -left-3 w-6 h-6 border-b-2 border-l-2 border-slate-600 rounded-bl-lg"></div>
+        <div class="absolute -bottom-3 -right-3 w-6 h-6 border-b-2 border-r-2 border-slate-600 rounded-br-lg"></div>
+
+        <div id="game-board-wrapper" class="relative">
+            <div id="game-board" class="board-container w-[320px] h-[320px] md:w-[380px] md:h-[380px] grid grid-cols-5 grid-rows-5 rounded bg-slate-900/80 overflow-hidden relative">
+                <!-- Grid Cells Generated JS -->
+                
+                <!-- 覆盖提示层 -->
+                <div id="instruction-overlay" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full text-center pointer-events-none z-20 hidden">
+                    <span id="instruction-text" class="text-white/70 font-bold text-sm tracking-widest bg-black/50 px-4 py-1 rounded backdrop-blur-sm border border-white/10 shadow-lg">
+                        SELECT ACTION
+                    </span>
+                </div>
+            </div>
+            
+            <!-- 独立浮动文字层 (确保文字不会被棋盘重绘清除) -->
+            <div id="float-layer" class="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded"></div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="w-full max-w-[380px] flex flex-col gap-3 z-10">
+        
+        <!-- Buy Actions -->
+        <div class="grid grid-cols-2 gap-3">
+            <button id="btn-buy-green" class="cyber-btn py-3 rounded flex flex-col items-center justify-center gap-1 group" onclick="game.setMode('buy-g')">
+                <div class="text-sm font-bold text-green-400 group-hover:text-white">BUY GREEN</div>
+                <div class="text-[10px] text-slate-400">COST: 1 AP</div>
+            </button>
+            <button id="btn-buy-blue" class="cyber-btn py-3 rounded flex flex-col items-center justify-center gap-1 group" onclick="game.setMode('buy-b')">
+                <div class="text-sm font-bold text-blue-400 group-hover:text-white">BUY BLUE</div>
+                <div class="text-[10px] text-slate-400">COST: 2 AP</div>
+            </button>
+        </div>
+
+        <!-- Special Actions (Only at start of turn) -->
+        <div class="grid grid-cols-2 gap-3">
+            <button id="btn-match" class="cyber-btn py-3 rounded flex flex-col items-center justify-center gap-1 group" onclick="game.setMode('match')">
+                <div class="text-sm font-bold text-yellow-400 group-hover:text-white">MATCH (3+)</div>
+                <div class="text-[10px] text-slate-400">COST: 5 AP</div>
+            </button>
+            <button id="btn-delete" class="cyber-btn py-3 rounded flex flex-col items-center justify-center gap-1 group" onclick="game.setMode('delete')">
+                <div class="text-sm font-bold text-red-400 group-hover:text-white">DELETE</div>
+                <div class="text-[10px] text-slate-400">COST: 5 AP</div>
+            </button>
+        </div>
+
+        <!-- Utility -->
+        <div class="flex gap-3 mt-1">
+            <button id="btn-reset" class="cyber-btn flex-1 py-2 rounded text-xs text-slate-300 border-slate-600 hover:text-white" onclick="game.resetTurn()">
+                RESET TURN
+            </button>
+            <button id="btn-new-game" class="cyber-btn w-12 py-2 rounded text-xs text-red-400 border-red-900 hover:text-white hover:bg-red-900" onclick="game.init()">
+                ↻
+            </button>
+        </div>
+        
+        <div id="status-msg" class="text-center text-xs text-slate-500 h-4 mt-1 font-mono tracking-tight">System Ready.</div>
+    </div>
+
+    <!-- Game Logic -->
+    <script>
+        const BOARD_SIZE = 5;
+        const MAX_AP = 5;
+
+        class GravityGame {
+            constructor() {
+                this.board = []; // 2D array [row][col]
+                this.scores = { p1: 0, p2: 0 };
+                this.turn = 'p1';
+                this.currentAP = MAX_AP;
+                this.gameActive = true;
+                this.mode = null; 
+                this.isProcessing = false;
+                
+                // For undo functionality
+                this.turnStartBoard = [];
+                
+                this.ui = {
+                    board: document.getElementById('game-board'),
+                    floatLayer: document.getElementById('float-layer'),
+                    apContainer: document.getElementById('ap-container'),
+                    p1Score: document.getElementById('p1-score'),
+                    p2Score: document.getElementById('p2-score'),
+                    status: document.getElementById('status-msg'),
+                    turnInd: document.getElementById('turn-indicator'),
+                    overlay: document.getElementById('instruction-overlay'),
+                    overlayText: document.getElementById('instruction-text'),
+                    btns: {
+                        buyG: document.getElementById('btn-buy-green'),
+                        buyB: document.getElementById('btn-buy-blue'),
+                        match: document.getElementById('btn-match'),
+                        delete: document.getElementById('btn-delete'),
+                        reset: document.getElementById('btn-reset')
+                    }
+                };
+
+                this.init();
+            }
+
+            init() {
+                this.board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+                this.scores = { p1: 0, p2: 0 };
+                this.turn = 'p1';
+                this.gameActive = true;
+                this.ui.board.classList.remove('locked');
+                this.startTurn();
+                this.renderBoard(); 
+                this.log("Game Initialized. Player 1 Start.");
+            }
+
+            startTurn() {
+                this.currentAP = MAX_AP;
+                // Deep copy board for undo
+                this.turnStartBoard = this.board.map(row => [...row]);
+                this.mode = null;
+                this.updateUI();
+                this.hideInstruction();
+                
+                // Check Win Condition at start of turn
+                this.checkWinCondition();
+            }
+
+            // --- Core Actions ---
+
+            setMode(mode) {
+                if (!this.gameActive || this.isProcessing) return;
+
+                // Validate costs immediately
+                if (mode === 'match' || mode === 'delete') {
+                    if (this.currentAP !== 5) {
+                        this.log("REQUIRES FULL 5 AP!", true);
+                        return;
+                    }
+                }
+                if (mode === 'buy-b' && this.currentAP < 2) {
+                    this.log("NOT ENOUGH AP FOR BLUE!", true);
+                    return;
+                }
+                if (mode === 'buy-g' && this.currentAP < 1) {
+                    this.log("NOT ENOUGH AP!", true);
+                    return;
+                }
+
+                this.mode = mode;
+                this.updateUI(); // Highlights buttons
+                
+                // Update board visuals
+                this.ui.board.className = `board-container w-[320px] h-[320px] md:w-[380px] md:h-[380px] grid grid-cols-5 grid-rows-5 rounded bg-slate-900/80 overflow-hidden relative mode-${mode}`;
+                
+                // Instructions
+                if (mode === 'match') this.showInstruction("CLICK GROUP TO ELIMINATE");
+                else if (mode === 'delete') this.showInstruction("CLICK PIECE TO DELETE");
+                else if (mode && mode.startsWith('buy')) this.showInstruction("SELECT COLUMN");
+                else this.hideInstruction();
+                
+                // Log fallback
+                if (mode === 'match') this.log("SELECT GROUP (3+) TO ELIMINATE");
+                else if (mode === 'delete') this.log("SELECT ANY PIECE TO DELETE");
+                else if (mode && mode.startsWith('buy')) this.log("SELECT COLUMN TO DROP PIECE");
+            }
+            
+            showInstruction(text) {
+                this.ui.overlayText.innerText = text;
+                this.ui.overlay.classList.remove('hidden');
+                this.ui.overlay.classList.add('fade-in');
+            }
+            
+            hideInstruction() {
+                this.ui.overlay.classList.add('hidden');
+                this.ui.overlay.classList.remove('fade-in');
+            }
+
+            handleMouseEnter(c) {
+                if (!this.mode || !this.mode.startsWith('buy')) return;
+                
+                // Add highlight class to all cells in column c
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    const cell = document.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+                    if (cell) cell.classList.add('grid-col-hover');
+                }
+            }
+
+            handleMouseLeave(c) {
+                const cells = document.querySelectorAll('.grid-cell');
+                cells.forEach(cell => cell.classList.remove('grid-col-hover'));
+            }
+
+            handleCellClick(r, c) {
+                if (!this.gameActive || this.isProcessing || !this.mode) return;
+
+                if (this.mode === 'buy-g') this.buyPiece('G', c);
+                else if (this.mode === 'buy-b') this.buyPiece('B', c);
+                else if (this.mode === 'delete') this.deletePiece(r, c);
+                else if (this.mode === 'match') this.matchGroup(r, c);
+            }
+
+            buyPiece(type, col) {
+                let cost = (type === 'G') ? 1 : 2;
+                
+                if (this.currentAP < cost) {
+                    this.log("NOT ENOUGH AP!", true);
+                    if (this.currentAP < 1) this.setMode(null);
+                    return;
+                }
+
+                let targetRow = -1;
+                for (let r = BOARD_SIZE - 1; r >= 0; r--) {
+                    if (this.board[r][col] === null) {
+                        targetRow = r;
+                        break;
+                    }
+                }
+
+                if (targetRow === -1) {
+                    this.log("COLUMN FULL!", true);
+                    return;
+                }
+
+                // Execute logic
+                this.board[targetRow][col] = type;
+                this.currentAP -= cost;
+
+                // Render specific update
+                this.renderPiece(targetRow, col, type, true);
+
+                // Auto-switch logic
+                if (this.mode === 'buy-b' && this.currentAP === 1) {
+                    this.log("AP LOW - SWITCHING TO GREEN", true);
+                    this.setMode('buy-g');
+                } else if (this.currentAP === 0) {
+                    this.setMode(null);
+                }
+                
+                this.checkTurnEnd();
+            }
+
+            async deletePiece(r, c) {
+                if (this.board[r][c] === null) return;
+                
+                this.hideInstruction();
+                this.isProcessing = true;
+                this.currentAP = 0; // Costs 5
+                this.updateUI();
+
+                // 1. Animate Deletion (New with Reflow Fix)
+                let cell = document.querySelector(`[data-r="${r}"][data-c="${c}"] .piece`);
+                if (cell) {
+                    // Critical Fix: Remove new-piece-anim class and force reflow to ensure delete anim plays
+                    cell.classList.remove('new-piece-anim');
+                    void cell.offsetWidth; // Force Reflow
+                    cell.classList.add('delete-anim');
+                }
+                
+                // Wait for animation (500ms anim, wait 550ms to be safe)
+                await new Promise(resolve => setTimeout(resolve, 550));
+
+                // 2. Remove Logic
+                this.board[r][c] = null;
+                this.renderBoard(); 
+                this.log("PIECE DELETED");
+
+                // 3. Gravity
+                await this.resolveGravity();
+
+                this.endTurn();
+            }
+
+            async matchGroup(r, c) {
+                if (this.board[r][c] === null) return;
+                
+                let type = this.board[r][c];
+                let group = this.findGroup(r, c, type);
+
+                if (group.length < 3) {
+                    this.log("GROUP TOO SMALL (NEEDS 3+)", true);
+                    return;
+                }
+
+                this.hideInstruction();
+                this.isProcessing = true;
+                this.currentAP = 0; // Costs 5
+                this.updateUI();
+
+                // 1. Score & Animate
+                await this.eliminateGroup(group, true); 
+
+                // 2. Gravity
+                await this.resolveGravity();
+
+                this.endTurn();
+            }
+
+            // --- Mechanics Engine ---
+
+            async resolveGravity() {
+                // Just apply gravity once. No loop, no auto-match check.
+                let dropped = await this.applyGravity();
+                if (dropped) {
+                    // Slight pause to let visual settle before turn passes
+                    await new Promise(r => setTimeout(r, 350));
+                }
+                this.isProcessing = false;
+            }
+
+            async applyGravity() {
+                let moved = false;
+                // Process column by column
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    let writeRow = BOARD_SIZE - 1;
+                    for (let r = BOARD_SIZE - 1; r >= 0; r--) {
+                        if (this.board[r][c] !== null) {
+                            if (writeRow !== r) {
+                                this.board[writeRow][c] = this.board[r][c];
+                                this.board[r][c] = null;
+                                moved = true;
+                            }
+                            writeRow--;
+                        }
+                    }
+                }
+                if (moved) this.renderBoard();
+                return moved;
+            }
+
+            findAllMatches() {
+                let matches = [];
+                let visited = new Set();
+
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (this.board[r][c] !== null && !visited.has(`${r},${c}`)) {
+                            let group = this.findGroup(r, c, this.board[r][c]);
+                            group.forEach(g => visited.add(`${g.r},${g.c}`));
+                            if (group.length >= 3) {
+                                matches.push(group);
+                            }
+                        }
+                    }
+                }
+                return matches;
+            }
+            
+            // Helpers for validation
+            hasPieces() {
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (this.board[r][c] !== null) return true;
+                    }
+                }
+                return false;
+            }
+            
+            hasValidMatches() {
+                return this.findAllMatches().length > 0;
+            }
+
+            findGroup(r, c, type) {
+                let group = [];
+                let queue = [{r, c}];
+                let visited = new Set([`${r},${c}`]);
+                
+                while (queue.length > 0) {
+                    let curr = queue.shift();
+                    group.push(curr);
+
+                    const dirs = [[0,1], [0,-1], [1,0], [-1,0]];
+                    for (let d of dirs) {
+                        let nr = curr.r + d[0];
+                        let nc = curr.c + d[1];
+                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                            if (!visited.has(`${nr},${nc}`) && this.board[nr][nc] === type) {
+                                visited.add(`${nr},${nc}`);
+                                queue.push({r: nr, c: nc});
+                            }
+                        }
+                    }
+                }
+                return group;
+            }
+
+            async eliminateGroup(group, scoreIt) {
+                // Add animation class
+                group.forEach(coord => {
+                    let cell = document.querySelector(`[data-r="${coord.r}"][data-c="${coord.c}"] .piece`);
+                    if (cell) {
+                         // Critical Fix: Remove new-piece-anim class and force reflow to ensure match anim plays
+                        cell.classList.remove('new-piece-anim');
+                        void cell.offsetWidth; // Force Reflow
+                        cell.classList.add('match-anim');
+                    }
+                });
+
+                if (scoreIt) {
+                    let points = group.length;
+                    this.scores[this.turn] += points;
+                    this.showFloatText(points, group[0].r, group[0].c);
+                }
+
+                // Wait for CSS animation (500ms) to complete before logical removal
+                await new Promise(r => setTimeout(r, 550));
+
+                group.forEach(coord => {
+                    this.board[coord.r][coord.c] = null;
+                });
+                this.renderBoard();
+                this.updateUI();
+            }
+
+            // --- Game Flow Control ---
+
+            resetTurn() {
+                if (this.isProcessing) return;
+                this.board = this.turnStartBoard.map(row => [...row]);
+                this.currentAP = MAX_AP;
+                this.mode = null;
+                this.log("TURN RESET");
+                this.hideInstruction();
+                this.renderBoard();
+                this.updateUI();
+            }
+
+            checkTurnEnd() {
+                if (this.currentAP === 0) {
+                    this.endTurn();
+                } else {
+                    this.updateUI();
+                }
+            }
+
+            endTurn() {
+                this.mode = null;
+                this.hideInstruction();
+                this.ui.board.className = this.ui.board.className.replace(/mode-[\w-]+/, '');
+                
+                this.turn = (this.turn === 'p1') ? 'p2' : 'p1';
+                this.startTurn();
+            }
+
+            checkWinCondition() {
+                let allMatches = this.findAllMatches();
+                let scoreDiff = Math.abs(this.scores.p1 - this.scores.p2);
+                let leader = this.scores.p1 > this.scores.p2 ? 'PLAYER 1' : 'PLAYER 2';
+
+                if (allMatches.length === 0 && scoreDiff >= 5) {
+                    this.gameActive = false;
+                    this.log(`GAME OVER! ${leader} WINS!`);
+                    this.ui.status.innerHTML = `<span class="text-yellow-400 font-bold tracking-widest">GAME OVER - ${leader} WINS (+${scoreDiff})</span>`;
+                    this.ui.board.classList.add('locked');
+                    this.updateUI();
+                }
+            }
+
+            // --- UI Helpers ---
+
+            updateUI() {
+                this.ui.p1Score.innerText = this.scores.p1;
+                this.ui.p2Score.innerText = this.scores.p2;
+                
+                // Render AP
+                this.ui.apContainer.innerHTML = '';
+                for(let i=0; i<MAX_AP; i++) {
+                    let pip = document.createElement('div');
+                    pip.className = `ap-pip ${i < this.currentAP ? 'filled' : ''}`;
+                    this.ui.apContainer.appendChild(pip);
+                }
+
+                this.ui.turnInd.innerText = `${this.turn === 'p1' ? 'PLAYER 1' : 'PLAYER 2'}`;
+                this.ui.turnInd.className = `px-3 py-1 border rounded text-xs font-bold tracking-wider shadow-lg transition-colors duration-300 ${this.turn === 'p1' ? 'bg-green-900/50 border-green-500 text-green-300 shadow-green-500/20' : 'bg-blue-900/50 border-blue-500 text-blue-300 shadow-blue-500/20'}`;
+
+                // Button States
+                const isStart = this.currentAP === MAX_AP;
+                
+                this.ui.btns.buyG.disabled = this.currentAP < 1 || this.isProcessing || !this.gameActive;
+                this.ui.btns.buyB.disabled = this.currentAP < 2 || this.isProcessing || !this.gameActive;
+                
+                const canDelete = this.hasPieces();
+                const canMatch = this.hasValidMatches();
+
+                this.ui.btns.match.disabled = !isStart || this.isProcessing || !this.gameActive || !canMatch;
+                this.ui.btns.delete.disabled = !isStart || this.isProcessing || !this.gameActive || !canDelete;
+                
+                this.ui.btns.reset.disabled = isStart || this.isProcessing || !this.gameActive;
+
+                // Active Button styling
+                Object.values(this.ui.btns).forEach(b => b.classList.remove('active'));
+                if (this.mode === 'buy-g') this.ui.btns.buyG.classList.add('active');
+                if (this.mode === 'buy-b') this.ui.btns.buyB.classList.add('active');
+                if (this.mode === 'match') this.ui.btns.match.classList.add('active');
+                if (this.mode === 'delete') this.ui.btns.delete.classList.add('active');
+            }
+
+            renderBoard() {
+                this.ui.board.innerHTML = '';
+                this.ui.board.appendChild(this.ui.overlay);
+
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        let cell = document.createElement('div');
+                        cell.className = 'grid-cell';
+                        cell.onmouseenter = () => this.handleMouseEnter(c);
+                        cell.onmouseleave = () => this.handleMouseLeave(c);
+                        cell.onclick = () => this.handleCellClick(r, c);
+                        
+                        cell.dataset.r = r;
+                        cell.dataset.c = c;
+
+                        let type = this.board[r][c];
+                        if (type) {
+                            let piece = document.createElement('div');
+                            piece.className = `piece ${type === 'G' ? 'green' : 'blue'}`;
+                            cell.appendChild(piece);
+                        }
+                        this.ui.board.appendChild(cell);
+                    }
+                }
+            }
+
+            renderPiece(r, c, type, anim) {
+                let cell = document.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+                if (cell) {
+                    cell.innerHTML = '';
+                    let piece = document.createElement('div');
+                    piece.className = `piece ${type === 'G' ? 'green' : 'blue'} ${anim ? 'new-piece-anim' : ''}`;
+                    cell.appendChild(piece);
+                }
+            }
+
+            log(msg, alertMode = false) {
+                this.ui.status.innerText = msg;
+                this.ui.status.className = `text-center text-xs h-4 mt-1 font-mono tracking-tight ${alertMode ? 'text-red-400 font-bold' : 'text-slate-500'}`;
+                
+                if (alertMode) {
+                    setTimeout(() => {
+                         this.ui.status.className = 'text-center text-xs h-4 mt-1 font-mono tracking-tight text-slate-500';
+                         this.ui.status.innerText = 'WAITING FOR INPUT...';
+                    }, 1500);
+                }
+            }
+
+            showFloatText(score, r, c) {
+                // Calculate position relative to float-layer
+                // Cell width approx 320/5 = 64px
+                const widthPct = 100/BOARD_SIZE;
+                const topPct = r * widthPct;
+                const leftPct = c * widthPct;
+
+                let el = document.createElement('div');
+                el.className = 'float-text';
+                el.innerText = `+${score}`;
+                el.style.top = topPct + '%';
+                el.style.left = leftPct + '%';
+                el.style.width = widthPct + '%';
+                
+                this.ui.floatLayer.appendChild(el);
+                setTimeout(() => el.remove(), 1000);
+            }
+        }
+
+        const game = new GravityGame();
+
+    </script>
+</body>
+</html>
