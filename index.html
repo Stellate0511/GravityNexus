@@ -245,9 +245,26 @@
             font-weight: bold;
         }
 
-        /* 移动端适配：仅在手机窄屏(<600px)时隐藏，防止与标题重叠 */
+        /* 移动端适配：屏幕变窄时 */
         @media (max-width: 600px) {
-            #profile-link { display: none; }
+            /* 1. 不再隐藏整个连接，而是让它保持显示 */
+            #profile-link { 
+                display: flex; 
+                /* 稍微调整位置，适配手机窄边框 */
+                top: 15px;
+                left: 15px;
+            }
+
+            /* 2. 只隐藏文字部分 */
+            #profile-link .profile-info { 
+                display: none; 
+            }
+
+            /* 3. (可选) 头像稍微缩小一点点，显得更精致 */
+            #profile-link img {
+                width: 40px;
+                height: 40px;
+            }
         }
     </style>
 </head>
